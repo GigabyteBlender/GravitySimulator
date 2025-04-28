@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Relativistic Gravity Simulator</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="simulation-container"></div>
+    
+    <div class="info-panel">
+        <h3>Relativistic Gravity Simulator</h3>
+        <p>Demonstrating Einstein's theory of general relativity</p>
+        <p><span style="color: #ffdd44;">●</span> Yellow object: Star (high mass)</p>
+        <p><span style="color: #4488ff;">●</span> Blue object: Planet (medium mass)</p>
+        <p><span style="color: #ffffff;">―</span> White lines: Light rays bending around massive objects</p>
+        <p>Grid: Represents spacetime curvature</p>
+    </div>
+
+    <div class="control-panel" id="control-panel">
+        <div class="settings-group">
+            <div class="settings-title">Simulation Controls</div>
+            <button id="reset-button">Reset Simulation</button>
+            <button id="toggle-grid">Toggle Grid</button>
+            <button id="add-photon">Add Light Ray</button>
+            <button id="clear-photons">Clear Light Rays</button>
+        </div>
+        
+        <div class="settings-group" id="selected-object-controls">
+            <div class="settings-title">Selected Object</div>
+            <div id="no-selection-message">No object selected</div>
+            
+            <div id="object-properties" style="display: none;">
+                <div class="setting-row">
+                    <label>Type:</label>
+                    <span id="selected-object-type">Planet</span>
+                </div>
+                
+                <div class="settings-title">Velocity Controls</div>
+                <div class="setting-row">
+                    <label for="velocity-x">X Velocity:</label>
+                    <input type="number" id="velocity-x" value="0" step="0.5">
+                </div>
+                <div class="setting-row">
+                    <label for="velocity-z">Z Velocity:</label>
+                    <input type="number" id="velocity-z" value="0" step="0.5">
+                </div>
+                <div class="setting-row">
+                    <button id="apply-velocity">Apply Velocity</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="object-palette">
+        <div class="object-item" data-type="star" data-mass="100" data-radius="2" data-color="0xffdd44">
+            <div class="object-preview" style="background-color: #ffdd44;"></div>
+            <span>Star</span>
+        </div>
+        <div class="object-item" data-type="planet" data-mass="10" data-radius="0.5" data-color="0x4488ff">
+            <div class="object-preview" style="background-color: #4488ff;"></div>
+            <span>Planet</span>
+        </div>
+        <div class="object-item" data-type="moon" data-mass="2" data-radius="0.25" data-color="0xcccccc">
+            <div class="object-preview" style="background-color: #cccccc;"></div>
+            <span>Moon</span>
+        </div>
+        <div class="object-item" data-type="blackhole" data-mass="150" data-radius="1" data-color="0x000000">
+            <div class="object-preview" style="background-color: #000000; box-shadow: 0 0 10px #6600ff;"></div>
+            <span>Black Hole</span>
+        </div>
+    </div>
+
+    <!-- Import Three.js from CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    
+    <!-- Import simulator script -->
+    <script src="simulator.js"></script>
+</body>
+</html>

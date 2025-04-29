@@ -4,13 +4,13 @@
 class RelativisticGravitySimulator {
   constructor(containerId) {
     // Set up the scene
-
     this.raycaster = new THREE.Raycaster();
     this.mouse = new THREE.Vector2();
     this.selectedBody = null;
-    this.dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    this.dragPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0); // Changed to face camera (z-axis)
     this.dragOffset = new THREE.Vector3();
     this.isDragging = false;
+    this.dragObject = null;
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
@@ -44,6 +44,7 @@ class RelativisticGravitySimulator {
     this.animate = this.animate.bind(this);
     this.animate();
 
+    // Mouse event handlers - Using bind to maintain context
     this.renderer.domElement.addEventListener('mousedown', this.onMouseDown.bind(this));
     this.renderer.domElement.addEventListener('mousemove', this.onMouseMove.bind(this));
     this.renderer.domElement.addEventListener('mouseup', this.onMouseUp.bind(this));
@@ -54,78 +55,263 @@ class RelativisticGravitySimulator {
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(window.innerWidth, window.innerHeight);
     });
+
+    // Initialize UI controls
+    this.initUIControls();
+  }
+
+  // Initialize UI controls and event listeners
+  initUIControls() {
+    // Setup object palette for drag and drop
+    const objectItems = document.querySelectorAll('.object-item');
+    objectItems.forEach(item => {
+      item.addEventListener('mousedown', this.onObjectDragStart.bind(this));
+    });
+
+    // Set up the selected object panel display
+    this.updateSelectedObjectPanel(null);
+  }
+
+  // Handle starting to drag an object from the palette
+  onObjectDragStart(event) {
+    // Prevent default to avoid browser's default drag behavior
+    event.preventDefault();
+    
+    // Get object data from the palette item
+    const objectItem = event.currentTarget;
+    const type = objectItem.dataset.type;
+    const mass = parseFloat(objectItem.dataset.mass);
+    const radius = parseFloat(objectItem.dataset.radius);
+    const color = parseInt(objectItem.dataset.color);
+    
+    // Create a ghost element for dragging
+    const ghost = document.createElement('div');
+    ghost.className = 'drag-ghost';
+    ghost.style.backgroundColor = objectItem.querySelector('.object-preview').style.backgroundColor;
+    document.body.appendChild(ghost);
+    
+    // Position ghost at mouse position
+    ghost.style.left = event.clientX + 'px';
+    ghost.style.top = event.clientY + 'px';
+    
+    // Store data for drop
+    this.dragObject = {
+      ghost,
+      type,
+      mass,
+      radius,
+      color
+    };
+    
+    // Add global mouse move and up handlers
+    document.addEventListener('mousemove', this.onDocumentMouseMove.bind(this));
+    document.addEventListener('mouseup', this.onDocumentMouseUp.bind(this));
+    
+    // Disable orbit controls while dragging from palette
+    this.controls.enabled = false;
+  }
+  
+  // Handle mouse move during object drag from palette
+  onDocumentMouseMove(event) {
+    if (this.dragObject) {
+      // Move the ghost element
+      this.dragObject.ghost.style.left = event.clientX + 'px';
+      this.dragObject.ghost.style.top = event.clientY + 'px';
+    }
+  }
+  
+  // Handle dropping an object from palette onto the simulation
+  onDocumentMouseUp(event) {
+    if (this.dragObject) {
+      // Calculate where in 3D space to place the object
+      this.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+      this.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+      
+      // Create a ray from the camera through the mouse position
+      this.raycaster.setFromCamera(this.mouse, this.camera);
+      
+      // Update drag plane to match camera orientation for more intuitive placement
+      this.updateDragPlane();
+      
+      // Find where the ray intersects the drag plane
+      const intersection = new THREE.Vector3();
+      if (this.raycaster.ray.intersectPlane(this.dragPlane, intersection)) {
+        // Add the object at the intersection point
+        this.addBody(
+          this.dragObject.mass,
+          this.dragObject.radius,
+          intersection,
+          new THREE.Vector3(0, 0, 0), // Starting with zero velocity
+          this.dragObject.color,
+          this.dragObject.type
+        );
+      }
+      
+      // Clean up
+      document.body.removeChild(this.dragObject.ghost);
+      document.removeEventListener('mousemove', this.onDocumentMouseMove);
+      document.removeEventListener('mouseup', this.onDocumentMouseUp);
+      this.dragObject = null;
+      
+      // Re-enable orbit controls
+      this.controls.enabled = true;
+    }
+  }
+  
+  // Update drag plane to match camera orientation for more intuitive placement
+  updateDragPlane() {
+    // Create a plane that's oriented to the camera's view
+    const planeNormal = new THREE.Vector3(0, 1, 0); // Use y-axis as default normal
+    this.dragPlane = new THREE.Plane(planeNormal, 0);
   }
   
   onMouseDown(event) {
+    // If we're dragging from the palette, don't interfere
+    if (this.dragObject) return;
+    
     // Calculate mouse position in normalized device coordinates (-1 to +1)
     this.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-    this.mouse.y = - (event.clientY / window.innerHeight) * 2 + 1;
+    this.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
     
     // Update the picking ray with the camera and mouse position
     this.raycaster.setFromCamera(this.mouse, this.camera);
     
-    // Find intersections
+    // Find intersections with non-photon objects
     const intersects = this.raycaster.intersectObjects(
-      this.bodies.filter(body => body.type !== 'photon').map(body => body.mesh)
+      this.bodies
+        .filter(body => body.type !== 'photon')
+        .map(body => body.mesh)
     );
     
     if (intersects.length > 0) {
       // Disable orbit controls while dragging
       this.controls.enabled = false;
       
-      // Store selected body
-      this.selectedBody = this.bodies.find(body => body.mesh === intersects[0].object);
+      // Find which body was selected by matching its mesh
+      const selectedMesh = intersects[0].object;
+      this.selectedBody = this.bodies.find(body => body.mesh === selectedMesh);
       
-      // Calculate drag plane intersection
-      const intersection = new THREE.Vector3();
-      this.raycaster.ray.intersectPlane(this.dragPlane, intersection);
-      
-      // Calculate offset between intersection and object position
-      this.dragOffset.subVectors(this.selectedBody.position, intersection);
-      
-      this.isDragging = true;
+      if (this.selectedBody) {
+        console.log("Selected body:", this.selectedBody.type);
+        
+        // Update drag plane to be perpendicular to camera view
+        this.updateDragPlane();
+        
+        // Calculate drag plane intersection
+        const intersection = new THREE.Vector3();
+        if (this.raycaster.ray.intersectPlane(this.dragPlane, intersection)) {
+          // Calculate offset between intersection and object position
+          this.dragOffset.subVectors(this.selectedBody.position, intersection);
+          this.isDragging = true;
+        }
+        
+        // Update UI with selected object
+        this.updateSelectedObjectPanel(this.selectedBody);
+      }
+    } else {
+      // If clicking on empty space, deselect
+      this.selectedBody = null;
+      this.updateSelectedObjectPanel(null);
     }
   }
   
   onMouseMove(event) {
+    // If we're dragging from the palette, don't interfere
+    if (this.dragObject) return;
+    
     if (!this.isDragging || !this.selectedBody) return;
     
     // Update mouse position
     this.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-    this.mouse.y = - (event.clientY / window.innerHeight) * 2 + 1;
+    this.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
     
     // Update the picking ray
     this.raycaster.setFromCamera(this.mouse, this.camera);
     
     // Calculate drag plane intersection
     const intersection = new THREE.Vector3();
-    this.raycaster.ray.intersectPlane(this.dragPlane, intersection);
-    
-    // Update selected body position with offset
-    this.selectedBody.position.copy(intersection.add(this.dragOffset));
-    this.selectedBody.mesh.position.copy(this.selectedBody.position);
-    
-    // Reset velocity when dragging
-    this.selectedBody.velocity.set(0, 0, 0);
-    
-    // Update spacetime curvature
-    this.updateSpacetimeCurvature();
+    if (this.raycaster.ray.intersectPlane(this.dragPlane, intersection)) {
+      // Update selected body position with offset
+      this.selectedBody.position.copy(intersection.add(this.dragOffset));
+      this.selectedBody.mesh.position.copy(this.selectedBody.position);
+      
+      // Reset velocity when dragging
+      this.selectedBody.velocity.set(0, 0, 0);
+      
+      // Update spacetime curvature
+      this.updateSpacetimeCurvature();
+    }
   }
   
-  onMouseUp() {
+  onMouseUp(event) {
+    // If we're handling a palette drag, don't interfere
+    if (this.dragObject) return;
+    
     // Re-enable orbit controls
     this.controls.enabled = true;
     this.isDragging = false;
     
     // Apply velocity from UI if available
     if (this.selectedBody) {
-      // Get velocity settings from UI if we've added those controls
-      const vx = parseFloat(document.getElementById('velocity-x').value || 0);
-      const vz = parseFloat(document.getElementById('velocity-z').value || 0);
-      this.selectedBody.velocity.set(vx, 0, vz);
+      const vxInput = document.getElementById('velocity-x');
+      const vzInput = document.getElementById('velocity-z');
+      
+      if (vxInput && vzInput) {
+        // Get velocity settings from UI
+        const vx = parseFloat(vxInput.value || 0);
+        const vz = parseFloat(vzInput.value || 0);
+        this.selectedBody.velocity.set(vx, 0, vz);
+      }
     }
     
-    this.selectedBody = null;
+    // Keep the selection for the UI but stop dragging
+    // Don't set selectedBody to null here so the UI stays updated
+  }
+  
+  // Update the UI panel with selected object properties
+  updateSelectedObjectPanel(body) {
+    const noSelectionMessage = document.getElementById('no-selection-message');
+    const objectProperties = document.getElementById('object-properties');
+    const selectedObjectType = document.getElementById('selected-object-type');
+    
+    if (!body) {
+      // No object selected
+      if (noSelectionMessage) noSelectionMessage.style.display = 'block';
+      if (objectProperties) objectProperties.style.display = 'none';
+      return;
+    }
+    
+    // Show object properties
+    if (noSelectionMessage) noSelectionMessage.style.display = 'none';
+    if (objectProperties) objectProperties.style.display = 'block';
+    
+    // Update type display
+    if (selectedObjectType) {
+      selectedObjectType.textContent = body.type.charAt(0).toUpperCase() + body.type.slice(1);
+    }
+    
+    // Update velocity inputs with current values
+    const vxInput = document.getElementById('velocity-x');
+    const vzInput = document.getElementById('velocity-z');
+    
+    if (vxInput && vzInput) {
+      vxInput.value = body.velocity.x;
+      vzInput.value = body.velocity.z;
+    }
+  }
+  
+  // Apply velocity from UI controls to selected object
+  applyVelocityFromUI() {
+    if (!this.selectedBody) return;
+    
+    const vxInput = document.getElementById('velocity-x');
+    const vzInput = document.getElementById('velocity-z');
+    
+    if (vxInput && vzInput) {
+      const vx = parseFloat(vxInput.value || 0);
+      const vz = parseFloat(vzInput.value || 0);
+      this.selectedBody.velocity.set(vx, 0, vz);
+    }
   }
   
   // Create a grid representing spacetime that can be deformed
@@ -454,6 +640,10 @@ class RelativisticGravitySimulator {
     
     // Reset spacetime
     this.updateSpacetimeCurvature();
+    
+    // Clear UI selection
+    this.selectedBody = null;
+    this.updateSelectedObjectPanel(null);
   }
   
   // Clear all photons from the simulation
@@ -481,7 +671,7 @@ document.addEventListener('DOMContentLoaded', () => {
     2,                                     // Radius
     new THREE.Vector3(0, 0, 0),           // Position
     new THREE.Vector3(0, 0, 0),           // Velocity (stationary)
-    0xffff00,                             // Color (yellow)
+    0xffdd44,                             // Color (yellow)
     'star'                                // Type
   );
   
@@ -518,7 +708,7 @@ document.addEventListener('DOMContentLoaded', () => {
       2,                                  // Radius
       new THREE.Vector3(0, 0, 0),        // Position
       new THREE.Vector3(0, 0, 0),        // Velocity
-      0xffff00,                          // Color
+      0xffdd44,                          // Color
       'star'                             // Type
     );
     
@@ -537,54 +727,13 @@ document.addEventListener('DOMContentLoaded', () => {
     simulator.toggleGrid();
   });
   
-  // Add new object
-  document.getElementById('add-object').addEventListener('click', () => {
-    // Get values from inputs
-    const type = document.getElementById('object-type').value;
-    const mass = parseFloat(document.getElementById('object-mass').value);
-    const radius = parseFloat(document.getElementById('object-radius').value);
-    const color = parseInt(document.getElementById('object-color').value);
-    
-    // Calculate random position (away from center)
-    const angle = Math.random() * Math.PI * 2;
-    const distance = 15 + Math.random() * 15; // Distance from center
-    const x = Math.cos(angle) * distance;
-    const z = Math.sin(angle) * distance;
-    const position = new THREE.Vector3(x, 0, z);
-    
-    // Calculate velocity for a decent orbit
-    const centerDirection = new THREE.Vector3(0, 0, 0).sub(position).normalize();
-    const perpDirection = new THREE.Vector3(-centerDirection.z, 0, centerDirection.x);
-    
-    // Orbital velocity depends on distance and central mass
-    const centralMass = simulator.bodies.find(b => b.position.x === 0 && b.position.z === 0)?.mass || 100;
-    const orbitalSpeed = Math.sqrt(6.67430e-11 * centralMass / distance) * 50; // Scale factor for sim
-    
-    const velocity = perpDirection.multiplyScalar(orbitalSpeed);
-    
-    // Add the new object
-    simulator.addBody(
-      mass,
-      radius,
-      position,
-      velocity,
-      color,
-      type
-    );
-  });
-  
-  // Update color preview when selection changes
-  document.getElementById('object-color').addEventListener('change', (e) => {
-    const colorValue = e.target.value;
-    // Convert from hex number to CSS color
-    const hexColor = '#' + colorValue.substring(2).padStart(6, '0');
-    document.getElementById('color-preview').style.backgroundColor = hexColor;
-  });
-  
-  // Initialize color preview
-  const initialColorValue = document.getElementById('object-color').value;
-  const initialHexColor = '#' + initialColorValue.substring(2).padStart(6, '0');
-  document.getElementById('color-preview').style.backgroundColor = initialHexColor;
+  // Apply velocity button
+  const applyVelocityButton = document.getElementById('apply-velocity');
+  if (applyVelocityButton) {
+    applyVelocityButton.addEventListener('click', () => {
+      simulator.applyVelocityFromUI();
+    });
+  }
   
   // Add photon
   document.getElementById('add-photon').addEventListener('click', () => {
